@@ -1,0 +1,38 @@
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+**/.env
+.env.*
+**/.env.*
+
+# Client build/cache
+client/.vite/
+client/dist/
+
+# Server build outputs
+server/dist/
+server/build/
+
+# Runtime logs/temp
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+*.seed
+*.tmp
+tmp/
+temp/
+
+# Caddy runtime data
+caddy/data/
+caddy/config/
+
+# OS files
+.DS_Store
+Thumbs.db
