@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 
-const ParticipantTile = ({ participant }) => {
+const ParticipantTile = ({ participant, currentRole, onKick, mirrorLocalVideo }) => {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
+  const activeVideoTrack = participant.screenTrack || participant.videoTrack;
 
   const pingMs = typeof participant.pingMs === 'number' ? participant.pingMs : null;
   const lossPercent = typeof participant.lossPercent === 'number' ? participant.lossPercent : null;
@@ -19,16 +20,16 @@ const ParticipantTile = ({ participant }) => {
   const signalLevel = getSignalLevel();
 
   useEffect(() => {
-    if (participant.videoTrack && videoRef.current) {
-      participant.videoTrack.attach(videoRef.current);
+    if (activeVideoTrack && videoRef.current) {
+      activeVideoTrack.attach(videoRef.current);
     }
 
     return () => {
-      if (participant.videoTrack) {
-        participant.videoTrack.detach();
+      if (activeVideoTrack) {
+        activeVideoTrack.detach();
       }
     };
-  }, [participant.videoTrack]);
+  }, [activeVideoTrack]);
 
   useEffect(() => {
     if (participant.audioTrack && !participant.isLocal) {
@@ -57,22 +58,23 @@ const ParticipantTile = ({ participant }) => {
           <span className={`signal-bar ${signalLevel >= 4 ? 'active' : ''}`} />
         </div>
       </div>
-      {participant.videoTrack ? (
+      {activeVideoTrack ? (
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted={participant.isLocal}
-          className="video"
+          className={`video ${participant.isLocal && mirrorLocalVideo && !participant.isScreenSharing ? 'mirrored' : ''}`}
         />
       ) : (
-        <div className="video placeholder">Camera off</div>
+        <div className="video placeholder">{participant.isScreenSharing ? 'Screen share off' : 'Camera off'}</div>
       )}
       <audio ref={audioRef} autoPlay muted={participant.isLocal} />
 
       <div className="tile-status-row">
         <span>{participant.audioMuted ? 'Mic off' : 'Mic on'}</span>
         <span>{participant.videoMuted ? 'Cam off' : 'Cam on'}</span>
+        <span>{participant.isScreenSharing ? 'Sharing screen' : 'No screen'}</span>
       </div>
 
       <div className="tile-network">
@@ -88,6 +90,14 @@ const ParticipantTile = ({ participant }) => {
           Lost: {typeof participant.lostPackets === 'number' ? participant.lostPackets : '--'}
         </span>
       </div>
+
+      {currentRole === 'teacher' && !participant.isLocal && participant.role !== 'teacher' && (
+        <div className="tile-actions">
+          <button className="button danger" onClick={() => onKick?.(participant.id)}>
+            Remove
+          </button>
+        </div>
+      )}
     </div>
   );
 };

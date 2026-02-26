@@ -195,6 +195,10 @@ h3 {
   object-fit: cover;
 }
 
+.video.mirrored {
+  transform: scaleX(-1);
+}
+
 .video.placeholder {
   display: flex;
   align-items: center;
@@ -218,6 +222,12 @@ h3 {
   border-radius: 999px;
   padding: 4px 8px;
   border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.tile-actions {
+  margin-top: 2px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .signal-badge {

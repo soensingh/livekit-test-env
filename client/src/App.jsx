@@ -20,6 +20,8 @@ function App() {
   const [participants, setParticipants] = useState([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [mirrorLocalVideo, setMirrorLocalVideo] = useState(false);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
@@ -31,6 +33,12 @@ function App() {
   const localIdentityRef = useRef('');
   const preferredFacingModeRef = useRef('user');
   const packetStatsRef = useRef({ sent: 0, lost: 0 });
+
+  const isScreenShareSource = (source) => {
+    if (!source) return false;
+    const normalized = `${source}`.toLowerCase();
+    return normalized.includes('screen');
+  };
 
   const appendMessage = (entry) => {
     setMessages((prev) => [...prev, entry]);
@@ -52,15 +60,28 @@ function App() {
     setParticipants((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const reconcileParticipants = (serverList = []) => {
+    setParticipants((prev) => {
+      const serverIds = new Set(serverList.map((item) => item.identity).filter(Boolean));
+      const localId = localIdentityRef.current;
+      return prev.filter((item) => {
+        if (item.id === localId) return true;
+        if (!item.isLocal && !serverIds.has(item.id)) return false;
+        return true;
+      });
+    });
+  };
+
   const updateParticipantTrack = (participant, track, kind, publication) => {
     const id = participant.identity || participant.sid;
     if (!id) return;
     const nameValue = participant.name || participant.identity || 'Guest';
     if (kind === 'video') {
+      const isScreenTrack = isScreenShareSource(publication?.source);
       upsertParticipant({
         id,
         name: nameValue,
-        videoTrack: track,
+        ...(isScreenTrack ? { screenTrack: track, isScreenSharing: true } : { videoTrack: track }),
         videoMuted: publication?.isMuted ?? false,
       });
       return;
@@ -126,14 +147,28 @@ function App() {
 
     socket.on('participants:update', (payload = {}) => {
       const list = Array.isArray(payload.participants) ? payload.participants : [];
+      reconcileParticipants(list);
       list.forEach((participant) => {
         if (!participant?.identity) return;
         upsertParticipant({
           id: participant.identity,
           name: participant.name || 'Guest',
+          role: participant.role || 'guest',
           ip: participant.ip || 'unknown',
         });
       });
+    });
+
+    socket.on('participant:kicked', (payload = {}) => {
+      const targetId = payload.identity;
+      if (!targetId) return;
+      removeParticipant(targetId);
+    });
+
+    socket.on('room:kicked', () => {
+      stopSession();
+      setRoomId('');
+      setStatus('kicked');
     });
 
     socket.on('room:end', () => {
@@ -309,11 +344,16 @@ function App() {
       updateParticipantTrack(participant, track, track.kind, publication);
     });
 
-    room.on('trackUnsubscribed', (track, _publication, participant) => {
+    room.on('trackUnsubscribed', (track, publication, participant) => {
       const id = participant.identity || participant.sid;
       if (!id) return;
       if (track.kind === 'video') {
-        upsertParticipant({ id, videoTrack: null, videoMuted: true });
+        const isScreenTrack = isScreenShareSource(publication?.source);
+        if (isScreenTrack) {
+          upsertParticipant({ id, screenTrack: null, isScreenSharing: false });
+        } else {
+          upsertParticipant({ id, videoTrack: null, videoMuted: true });
+        }
       }
       if (track.kind === 'audio') {
         upsertParticipant({ id, audioTrack: null, audioMuted: true });
@@ -347,11 +387,21 @@ function App() {
       if (!track) return;
       const localIdentity = room.localParticipant.identity || room.localParticipant.sid || 'local';
       if (track.kind === 'video') {
-        upsertParticipant({
-          id: localIdentity,
-          videoTrack: track,
-          videoMuted: publication.isMuted,
-        });
+        const isScreenTrack = isScreenShareSource(publication.source);
+        if (isScreenTrack) {
+          upsertParticipant({
+            id: localIdentity,
+            screenTrack: track,
+            isScreenSharing: true,
+          });
+          setScreenSharing(true);
+        } else {
+          upsertParticipant({
+            id: localIdentity,
+            videoTrack: track,
+            videoMuted: publication.isMuted,
+          });
+        }
       }
       if (track.kind === 'audio') {
         upsertParticipant({
@@ -365,7 +415,13 @@ function App() {
     room.on('localTrackUnpublished', (publication) => {
       const localIdentity = room.localParticipant.identity || room.localParticipant.sid || 'local';
       if (publication.kind === 'video') {
-        upsertParticipant({ id: localIdentity, videoTrack: null, videoMuted: true });
+        const isScreenTrack = isScreenShareSource(publication.source);
+        if (isScreenTrack) {
+          upsertParticipant({ id: localIdentity, screenTrack: null, isScreenSharing: false });
+          setScreenSharing(false);
+        } else {
+          upsertParticipant({ id: localIdentity, videoTrack: null, videoMuted: true });
+        }
       }
       if (publication.kind === 'audio') {
         upsertParticipant({ id: localIdentity, audioTrack: null, audioMuted: true });
@@ -397,6 +453,8 @@ function App() {
       name: room.localParticipant.name || name || 'You',
       isLocal: true,
       videoTrack: localVideo,
+      screenTrack: null,
+      isScreenSharing: false,
       audioTrack: localAudio,
       audioMuted: !room.localParticipant.isMicrophoneEnabled,
       videoMuted: !room.localParticipant.isCameraEnabled,
@@ -404,6 +462,7 @@ function App() {
 
     setMicEnabled(room.localParticipant.isMicrophoneEnabled);
     setCamEnabled(room.localParticipant.isCameraEnabled);
+    setScreenSharing(false);
   };
 
   const stopSession = () => {
@@ -415,8 +474,29 @@ function App() {
     setMessages([]);
     setCameraDevices([]);
     setSelectedCameraId('');
+    setScreenSharing(false);
     packetStatsRef.current = { sent: 0, lost: 0 };
     localIdentityRef.current = '';
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (!roomRef.current) return;
+    const next = !screenSharing;
+    try {
+      await roomRef.current.localParticipant.setScreenShareEnabled(next, { audio: false });
+      setScreenSharing(next);
+      const localId =
+        roomRef.current.localParticipant.identity || roomRef.current.localParticipant.sid || 'local';
+      if (!next) {
+        upsertParticipant({ id: localId, screenTrack: null, isScreenSharing: false });
+      }
+    } catch {
+      setStatus('screen-share-failed');
+    }
+  };
+
+  const handleFlipLocalVideo = () => {
+    setMirrorLocalVideo((prev) => !prev);
   };
 
   const handleToggleMic = async () => {
@@ -564,6 +644,17 @@ function App() {
     setStatus('ended');
   };
 
+  const handleKickParticipant = (participantId) => {
+    const socket = socketRef.current;
+    if (!socket || !roomId || !participantId || role !== 'teacher') return;
+    socket.emit('room:kick', { roomId, targetIdentity: participantId }, (response) => {
+      if (!response?.ok) {
+        return;
+      }
+      removeParticipant(participantId);
+    });
+  };
+
   if (!role) {
     return <HomePage name={name} setName={setName} onSelectRole={setRole} />;
   }
@@ -602,10 +693,15 @@ function App() {
       camEnabled={camEnabled}
       onToggleMic={handleToggleMic}
       onToggleCam={handleToggleCam}
+      screenSharing={screenSharing}
+      onToggleScreenShare={handleToggleScreenShare}
+      mirrorLocalVideo={mirrorLocalVideo}
+      onFlipLocalVideo={handleFlipLocalVideo}
       cameraDevices={cameraDevices}
       selectedCameraId={selectedCameraId}
       onSelectCamera={handleSelectCamera}
       onSwitchCamera={handleSwitchCamera}
+      onKickParticipant={handleKickParticipant}
       messages={messages}
       chatInput={chatInput}
       setChatInput={setChatInput}

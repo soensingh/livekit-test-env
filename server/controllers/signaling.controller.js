@@ -45,6 +45,18 @@ const emitParticipantsUpdate = (io, roomId) => {
   io.to(roomId).emit('participants:update', { roomId, participants });
 };
 
+const findMemberByIdentity = (roomId, identity) => {
+  if (!roomId || !identity) return null;
+  const members = roomMembers.get(roomId);
+  if (!members) return null;
+  for (const member of members.values()) {
+    if (member.identity === identity) {
+      return member;
+    }
+  }
+  return null;
+};
+
 const register = (io) => {
   io.on('connection', (socket) => {
     console.log(`[SOCKET] connected ${socket.id} ip=${socket.handshake.address}`);
@@ -154,6 +166,51 @@ const register = (io) => {
       console.log(`[SOCKET] room:end ${roomId} socket=${socket.id}`);
       if (ack) return ack({ ok: true });
       return undefined;
+    });
+
+    socket.on('room:kick', (payload = {}, ack) => {
+      const { roomId, targetIdentity } = payload;
+      const requesterRole = socket.data.role;
+      if (!roomId || !targetIdentity) {
+        if (ack) return ack({ ok: false, error: 'INVALID_PAYLOAD' });
+        return;
+      }
+      if (requesterRole !== 'teacher') {
+        if (ack) return ack({ ok: false, error: 'FORBIDDEN' });
+        return;
+      }
+
+      const room = roomService.getRoom(roomId);
+      if (!room || room.state !== 'LIVE') {
+        if (ack) return ack({ ok: false, error: 'ROOM_NOT_LIVE' });
+        return;
+      }
+
+      const targetMember = findMemberByIdentity(roomId, targetIdentity);
+      if (!targetMember) {
+        if (ack) return ack({ ok: false, error: 'PARTICIPANT_NOT_FOUND' });
+        return;
+      }
+
+      if (targetMember.role === 'teacher') {
+        if (ack) return ack({ ok: false, error: 'CANNOT_KICK_TEACHER' });
+        return;
+      }
+
+      const targetSocket = io.sockets.sockets.get(targetMember.socketId);
+      if (targetSocket) {
+        targetSocket.emit('room:kicked', { roomId });
+        targetSocket.leave(roomId);
+        targetSocket.data.roomId = null;
+      }
+
+      roomService.removeStudent(roomId, targetMember.ip);
+      removeRoomMember({ roomId, socketId: targetMember.socketId });
+      emitParticipantsUpdate(io, roomId);
+      io.to(roomId).emit('participant:kicked', { roomId, identity: targetIdentity });
+      console.log(`[SOCKET] room:kick room=${roomId} target=${targetIdentity}`);
+
+      if (ack) return ack({ ok: true });
     });
 
     // WebRTC signaling is relayed to the SFU (or any socket joined to the room).

@@ -14,12 +14,17 @@ const ClassroomPage = ({
   participants,
   micEnabled,
   camEnabled,
+  screenSharing,
   onToggleMic,
   onToggleCam,
+  onToggleScreenShare,
+  mirrorLocalVideo,
+  onFlipLocalVideo,
   cameraDevices,
   selectedCameraId,
   onSelectCamera,
   onSwitchCamera,
+  onKickParticipant,
   messages,
   chatInput,
   setChatInput,
@@ -67,7 +72,13 @@ const ClassroomPage = ({
               <div className="video placeholder">No participants yet</div>
             ) : (
               participants.map((participant) => (
-                <ParticipantTile key={participant.id} participant={participant} />
+                <ParticipantTile
+                  key={participant.id}
+                  participant={participant}
+                  currentRole={role}
+                  onKick={onKickParticipant}
+                  mirrorLocalVideo={mirrorLocalVideo}
+                />
               ))
             )}
           </div>
@@ -79,6 +90,12 @@ const ClassroomPage = ({
               </button>
               <button className="button control" onClick={onToggleCam}>
                 {camEnabled ? 'Stop video' : 'Start video'}
+              </button>
+              <button className="button control" onClick={onToggleScreenShare}>
+                {screenSharing ? 'Stop share' : 'Share screen'}
+              </button>
+              <button className="button control" onClick={onFlipLocalVideo}>
+                {mirrorLocalVideo ? 'Unflip video' : 'Flip video'}
               </button>
               <button className="button control" onClick={onSwitchCamera}>
                 Switch camera
