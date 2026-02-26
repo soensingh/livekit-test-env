@@ -2,7 +2,10 @@ port: 7880
 
 rtc:
   udp_port: 7881
-  use_external_ip: false
+  use_external_ip: true
 
 keys:
-  devkey: devsecret
+  classroomKey: "cf91361cad4a635f70c356a3691abceb29a7742b744b1460204a33ceb33cc205"
+
+turn:
+  enabled: false
