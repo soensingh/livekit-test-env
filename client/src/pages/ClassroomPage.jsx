@@ -16,63 +16,52 @@ const ClassroomPage = ({
   camEnabled,
   onToggleMic,
   onToggleCam,
+  cameraDevices,
+  selectedCameraId,
+  onSelectCamera,
+  onSwitchCamera,
   messages,
   chatInput,
   setChatInput,
   onSendChat,
 }) => {
   return (
-    <div className="page">
-      <div className="card wide">
-        <div className="row space">
-          <div>
-            <h2>Classroom</h2>
-            <p className="muted">Role: {role}</p>
-            <p className="muted">Status: {status}</p>
-          </div>
-          {roomId && <div className="pill">Room ID: {roomId}</div>}
+    <div className="meet-shell">
+      <header className="meet-topbar">
+        <div>
+          <h2>Live Classroom</h2>
+          <p className="muted">Role: {role} · Status: {status}</p>
         </div>
-
-        {role === 'teacher' ? (
-          <div className="row">
+        <div className="topbar-right">
+          {roomId && <div className="pill">Room ID: {roomId}</div>}
+          {!roomId && role === 'teacher' && (
             <button className="button" onClick={onCreateRoom}>
-              Create Room
+              Start Meeting
             </button>
-            {roomId && (
-              <button className="button secondary" onClick={onEndRoom}>
-                End Room
+          )}
+          {!roomId && role === 'student' && (
+            <div className="join-inline">
+              <input
+                className="input"
+                placeholder="Enter room code"
+                value={roomInput}
+                onChange={(e) => setRoomInput(e.target.value)}
+              />
+              <button className="button" onClick={onJoinRoom}>
+                Join
               </button>
-            )}
-          </div>
-        ) : (
-          <div className="row">
-            <input
-              className="input"
-              placeholder="Room ID"
-              value={roomInput}
-              onChange={(e) => setRoomInput(e.target.value)}
-            />
-            <button className="button" onClick={onJoinRoom}>
-              Join Room
+            </div>
+          )}
+          {roomId && role === 'teacher' && (
+            <button className="button danger" onClick={onEndRoom}>
+              End for all
             </button>
-          </div>
-        )}
+          )}
+        </div>
+      </header>
 
-        {roomId && (
-          <div className="row">
-            <button className="button secondary" onClick={onLeaveRoom}>
-              Leave Room
-            </button>
-            <button className="button" onClick={onToggleMic}>
-              {micEnabled ? 'Mute Mic' : 'Unmute Mic'}
-            </button>
-            <button className="button" onClick={onToggleCam}>
-              {camEnabled ? 'Camera Off' : 'Camera On'}
-            </button>
-          </div>
-        )}
-
-        <div className="content-grid">
+      <div className="meet-main">
+        <section className="video-stage">
           <div className="video-grid">
             {participants.length === 0 ? (
               <div className="video placeholder">No participants yet</div>
@@ -83,35 +72,64 @@ const ClassroomPage = ({
             )}
           </div>
 
-          <div className="chat-panel">
-            <h3>Room Chat</h3>
-            <div className="chat-messages">
-              {messages.length === 0 ? (
-                <p className="muted">No messages yet.</p>
-              ) : (
-                messages.map((msg) => (
-                  <div key={msg.id} className="chat-message">
-                    <strong>{msg.sender}:</strong> {msg.text}
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="row">
-              <input
-                className="input"
-                placeholder="Type a message"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') onSendChat();
-                }}
-              />
-              <button className="button" onClick={onSendChat}>
-                Send
+          {roomId && (
+            <div className="meet-controls">
+              <button className="button control" onClick={onToggleMic}>
+                {micEnabled ? 'Mute' : 'Unmute'}
+              </button>
+              <button className="button control" onClick={onToggleCam}>
+                {camEnabled ? 'Stop video' : 'Start video'}
+              </button>
+              <button className="button control" onClick={onSwitchCamera}>
+                Switch camera
+              </button>
+              <select
+                className="input camera-select"
+                value={selectedCameraId}
+                onChange={(e) => onSelectCamera(e.target.value)}
+              >
+                <option value="">Default camera</option>
+                {cameraDevices.map((device, idx) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Camera ${idx + 1}`}
+                  </option>
+                ))}
+              </select>
+              <button className="button secondary" onClick={onLeaveRoom}>
+                Leave
               </button>
             </div>
+          )}
+        </section>
+
+        <aside className="chat-panel">
+          <h3>In-meeting chat</h3>
+          <div className="chat-messages">
+            {messages.length === 0 ? (
+              <p className="muted">No messages yet.</p>
+            ) : (
+              messages.map((msg) => (
+                <div key={msg.id} className="chat-message">
+                  <strong>{msg.sender}:</strong> {msg.text}
+                </div>
+              ))
+            )}
           </div>
-        </div>
+          <div className="row chat-input-row">
+            <input
+              className="input"
+              placeholder="Type a message"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onSendChat();
+              }}
+            />
+            <button className="button" onClick={onSendChat}>
+              Send
+            </button>
+          </div>
+        </aside>
       </div>
     </div>
   );

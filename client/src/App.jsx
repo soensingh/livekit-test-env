@@ -7,8 +7,9 @@ import AdminPage from './pages/AdminPage';
 import './App.css';
 
 const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || window.location.origin;
-
 const SFU_URL = import.meta.env.VITE_SFU_URL || '';
+
+const createIdentity = (role) => `${role}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
 function App() {
   const [role, setRole] = useState(null);
@@ -22,10 +23,14 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
+  const [cameraDevices, setCameraDevices] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
 
   const socketRef = useRef(null);
   const roomRef = useRef(null);
   const localIdentityRef = useRef('');
+  const preferredFacingModeRef = useRef('user');
+  const packetStatsRef = useRef({ sent: 0, lost: 0 });
 
   const appendMessage = (entry) => {
     setMessages((prev) => [...prev, entry]);
@@ -96,6 +101,20 @@ function App() {
     });
   };
 
+  const refreshCameraDevices = async () => {
+    if (!navigator?.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((device) => device.kind === 'videoinput');
+      setCameraDevices(cameras);
+      if (!selectedCameraId && cameras.length > 0) {
+        setSelectedCameraId(cameras[0].deviceId);
+      }
+    } catch {
+      setCameraDevices([]);
+    }
+  };
+
   useEffect(() => {
     if (!role || role === 'admin') return;
     const socket = io(SIGNALING_URL, { transports: ['websocket'] });
@@ -103,6 +122,18 @@ function App() {
 
     socket.on('connect', () => {
       socket.emit('role:selected', { role, name });
+    });
+
+    socket.on('participants:update', (payload = {}) => {
+      const list = Array.isArray(payload.participants) ? payload.participants : [];
+      list.forEach((participant) => {
+        if (!participant?.identity) return;
+        upsertParticipant({
+          id: participant.identity,
+          name: participant.name || 'Guest',
+          ip: participant.ip || 'unknown',
+        });
+      });
     });
 
     socket.on('room:end', () => {
@@ -123,9 +154,16 @@ function App() {
     });
 
     socket.on('ping:update', (payload = {}) => {
-      const { identity, pingMs } = payload;
+      const { identity, pingMs, totalPackets, lostPackets, lossPercent, ip } = payload;
       if (!identity || typeof pingMs !== 'number') return;
-      upsertParticipant({ id: identity, pingMs });
+      upsertParticipant({
+        id: identity,
+        pingMs,
+        totalPackets: typeof totalPackets === 'number' ? totalPackets : undefined,
+        lostPackets: typeof lostPackets === 'number' ? lostPackets : undefined,
+        lossPercent: typeof lossPercent === 'number' ? lossPercent : undefined,
+        ip: ip || undefined,
+      });
     });
 
     return () => {
@@ -166,30 +204,54 @@ function App() {
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !roomId || !localIdentityRef.current) return;
+
+    packetStatsRef.current = { sent: 0, lost: 0 };
+
     const interval = setInterval(() => {
       const start = performance.now();
+      packetStatsRef.current.sent += 1;
+
       socket.timeout(2000).emit('ping:echo', { roomId }, (err) => {
-        if (err) return;
-        const pingMs = Math.round(performance.now() - start);
+        if (err) {
+          packetStatsRef.current.lost += 1;
+        }
+
+        const pingMs = err ? 2000 : Math.round(performance.now() - start);
+        const sent = packetStatsRef.current.sent;
+        const lost = packetStatsRef.current.lost;
+        const lossPercent = sent > 0 ? Math.round((lost / sent) * 10000) / 100 : 0;
         const identity = localIdentityRef.current;
         if (!identity) return;
-        socket.emit('ping:report', { roomId, identity, pingMs });
-        upsertParticipant({ id: identity, pingMs });
+
+        socket.emit('ping:report', {
+          roomId,
+          identity,
+          pingMs,
+          totalPackets: sent,
+          lostPackets: lost,
+          lossPercent,
+        });
+
+        upsertParticipant({
+          id: identity,
+          pingMs,
+          totalPackets: sent,
+          lostPackets: lost,
+          lossPercent,
+        });
       });
     }, 3000);
 
     return () => clearInterval(interval);
   }, [roomId]);
 
-  const startSession = async (activeRoomId) => {
+  const startSession = async (activeRoomId, providedIdentity) => {
     const socket = socketRef.current;
     if (!socket || !activeRoomId) return;
 
-    const identity = `${role}-${Date.now()}`;
+    const identity = providedIdentity || localIdentityRef.current || createIdentity(role);
     localIdentityRef.current = identity;
 
-    // WebRTC: LiveKit (SFU) handles signaling and media routing.
-    // TURN/STUN usage is handled by the SFU configuration.
     const response = await fetch(`${SIGNALING_URL}/api/sfu/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -212,7 +274,18 @@ function App() {
       return;
     }
 
-    const room = new Room();
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        resolution: {
+          width: 1280,
+          height: 720,
+        },
+        frameRate: 24,
+      },
+    });
+
     roomRef.current = room;
 
     room.on('participantConnected', (participant) => {
@@ -248,6 +321,7 @@ function App() {
     });
 
     await room.connect(SFU_URL, tokenValue);
+
     const localId = room.localParticipant.identity || room.localParticipant.sid || identity;
     upsertParticipant({
       id: localId,
@@ -261,6 +335,7 @@ function App() {
 
     try {
       await room.localParticipant.enableCameraAndMicrophone();
+      await refreshCameraDevices();
     } catch {
       setStatus('media-blocked');
     }
@@ -270,22 +345,30 @@ function App() {
     room.on('localTrackPublished', (publication) => {
       const track = publication?.track;
       if (!track) return;
-      const localId = room.localParticipant.identity || room.localParticipant.sid || 'local';
+      const localIdentity = room.localParticipant.identity || room.localParticipant.sid || 'local';
       if (track.kind === 'video') {
-        upsertParticipant({ id: localId, videoTrack: track, videoMuted: publication.isMuted });
+        upsertParticipant({
+          id: localIdentity,
+          videoTrack: track,
+          videoMuted: publication.isMuted,
+        });
       }
       if (track.kind === 'audio') {
-        upsertParticipant({ id: localId, audioTrack: track, audioMuted: publication.isMuted });
+        upsertParticipant({
+          id: localIdentity,
+          audioTrack: track,
+          audioMuted: publication.isMuted,
+        });
       }
     });
 
     room.on('localTrackUnpublished', (publication) => {
-      const localId = room.localParticipant.identity || room.localParticipant.sid || 'local';
+      const localIdentity = room.localParticipant.identity || room.localParticipant.sid || 'local';
       if (publication.kind === 'video') {
-        upsertParticipant({ id: localId, videoTrack: null, videoMuted: true });
+        upsertParticipant({ id: localIdentity, videoTrack: null, videoMuted: true });
       }
       if (publication.kind === 'audio') {
-        upsertParticipant({ id: localId, audioTrack: null, audioMuted: true });
+        upsertParticipant({ id: localIdentity, audioTrack: null, audioMuted: true });
       }
     });
 
@@ -308,6 +391,7 @@ function App() {
 
     const localVideo = room.localParticipant.getTrackPublication('camera')?.track || null;
     const localAudio = room.localParticipant.getTrackPublication('microphone')?.track || null;
+
     upsertParticipant({
       id: localId,
       name: room.localParticipant.name || name || 'You',
@@ -320,7 +404,6 @@ function App() {
 
     setMicEnabled(room.localParticipant.isMicrophoneEnabled);
     setCamEnabled(room.localParticipant.isCameraEnabled);
-
   };
 
   const stopSession = () => {
@@ -330,6 +413,9 @@ function App() {
     }
     setParticipants([]);
     setMessages([]);
+    setCameraDevices([]);
+    setSelectedCameraId('');
+    packetStatsRef.current = { sent: 0, lost: 0 };
     localIdentityRef.current = '';
   };
 
@@ -349,6 +435,61 @@ function App() {
     setCamEnabled(next);
     const localId = roomRef.current.localParticipant.identity || roomRef.current.localParticipant.sid || 'local';
     upsertParticipant({ id: localId, videoMuted: !next });
+    if (next) {
+      await refreshCameraDevices();
+    }
+  };
+
+  const handleSelectCamera = async (cameraId) => {
+    if (!cameraId) return;
+    setSelectedCameraId(cameraId);
+    if (!roomRef.current) return;
+
+    const publication = roomRef.current.localParticipant.getTrackPublication('camera');
+    const track = publication?.track;
+
+    try {
+      if (track?.restartTrack) {
+        await track.restartTrack({ deviceId: cameraId });
+      } else {
+        await roomRef.current.localParticipant.setCameraEnabled(true, { deviceId: cameraId });
+      }
+      setCamEnabled(true);
+    } catch {
+      setStatus('camera-switch-failed');
+    }
+  };
+
+  const handleSwitchCamera = async () => {
+    if (!roomRef.current) return;
+
+    if (cameraDevices.length > 1) {
+      const index = cameraDevices.findIndex((device) => device.deviceId === selectedCameraId);
+      const nextIndex = index === -1 ? 0 : (index + 1) % cameraDevices.length;
+      const next = cameraDevices[nextIndex]?.deviceId;
+      if (next) {
+        await handleSelectCamera(next);
+      }
+      return;
+    }
+
+    preferredFacingModeRef.current = preferredFacingModeRef.current === 'user' ? 'environment' : 'user';
+    const publication = roomRef.current.localParticipant.getTrackPublication('camera');
+    const track = publication?.track;
+
+    try {
+      if (track?.restartTrack) {
+        await track.restartTrack({ facingMode: preferredFacingModeRef.current });
+      } else {
+        await roomRef.current.localParticipant.setCameraEnabled(true, {
+          facingMode: preferredFacingModeRef.current,
+        });
+      }
+      setCamEnabled(true);
+      await refreshCameraDevices();
+    } catch {
+      setStatus('camera-switch-failed');
+    }
   };
 
   const handleSendChat = () => {
@@ -368,30 +509,38 @@ function App() {
   const handleCreateRoom = () => {
     const socket = socketRef.current;
     if (!socket) return;
+
+    const identity = createIdentity('teacher');
+    localIdentityRef.current = identity;
+
     setStatus('connecting');
-    socket.emit('room:create', { name }, async (response) => {
+    socket.emit('room:create', { name, identity }, async (response) => {
       if (!response?.ok) {
         setStatus('error');
         return;
       }
       setRoomId(response.roomId);
       setStatus('live');
-      await startSession(response.roomId);
+      await startSession(response.roomId, identity);
     });
   };
 
   const handleJoinRoom = () => {
     const socket = socketRef.current;
     if (!socket || !roomInput) return;
+
+    const identity = createIdentity('student');
+    localIdentityRef.current = identity;
+
     setStatus('connecting');
-    socket.emit('room:join', { roomId: roomInput, name }, async (response) => {
+    socket.emit('room:join', { roomId: roomInput, name, identity }, async (response) => {
       if (!response?.ok) {
         setStatus('error');
         return;
       }
       setRoomId(response.roomId);
       setStatus('live');
-      await startSession(response.roomId);
+      await startSession(response.roomId, identity);
     });
   };
 
@@ -453,6 +602,10 @@ function App() {
       camEnabled={camEnabled}
       onToggleMic={handleToggleMic}
       onToggleCam={handleToggleCam}
+      cameraDevices={cameraDevices}
+      selectedCameraId={selectedCameraId}
+      onSelectCamera={handleSelectCamera}
+      onSwitchCamera={handleSwitchCamera}
       messages={messages}
       chatInput={chatInput}
       setChatInput={setChatInput}
