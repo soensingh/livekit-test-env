@@ -20,6 +20,7 @@ const ClassroomPage = ({
   onToggleScreenShare,
   mirrorLocalVideo,
   onFlipLocalVideo,
+  qualityMode,
   cameraDevices,
   selectedCameraId,
   onSelectCamera,
@@ -35,7 +36,7 @@ const ClassroomPage = ({
       <header className="meet-topbar">
         <div>
           <h2>Live Classroom</h2>
-          <p className="muted">Role: {role} · Status: {status}</p>
+          <p className="muted">Role: {role} · Status: {status} · Network mode: {qualityMode}</p>
         </div>
         <div className="topbar-right">
           {roomId && <div className="pill">Room ID: {roomId}</div>}

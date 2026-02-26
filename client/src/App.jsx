@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { Room } from 'livekit-client';
+import { Room, VideoQuality } from 'livekit-client';
 import HomePage from './pages/HomePage';
 import ClassroomPage from './pages/ClassroomPage';
 import AdminPage from './pages/AdminPage';
@@ -27,17 +27,95 @@ function App() {
   const [adminRooms, setAdminRooms] = useState([]);
   const [cameraDevices, setCameraDevices] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [qualityMode, setQualityMode] = useState('balanced');
 
   const socketRef = useRef(null);
   const roomRef = useRef(null);
   const localIdentityRef = useRef('');
   const preferredFacingModeRef = useRef('user');
   const packetStatsRef = useRef({ sent: 0, lost: 0 });
+  const activeQualityTierRef = useRef('balanced');
+  const lastQualitySwitchAtRef = useRef(0);
 
   const isScreenShareSource = (source) => {
     if (!source) return false;
     const normalized = `${source}`.toLowerCase();
     return normalized.includes('screen');
+  };
+
+  const getTierProfile = (tier) => {
+    if (tier === 'smooth') {
+      return {
+        width: 480,
+        height: 270,
+        frameRate: 15,
+        remoteQuality: VideoQuality.LOW,
+      };
+    }
+    if (tier === 'quality') {
+      return {
+        width: 960,
+        height: 540,
+        frameRate: 24,
+        remoteQuality: VideoQuality.HIGH,
+      };
+    }
+    return {
+      width: 640,
+      height: 360,
+      frameRate: 20,
+      remoteQuality: VideoQuality.MEDIUM,
+    };
+  };
+
+  const resolveQualityTier = ({ pingMs, lossPercent }) => {
+    if (typeof pingMs !== 'number') return 'balanced';
+    if (lossPercent >= 9 || pingMs >= 320) return 'smooth';
+    if (lossPercent >= 4 || pingMs >= 180) return 'balanced';
+    return 'quality';
+  };
+
+  const applyRemoteQuality = (room, remoteQuality) => {
+    if (!room?.remoteParticipants) return;
+    room.remoteParticipants.forEach((participant) => {
+      participant.videoTrackPublications?.forEach((publication) => {
+        if (publication?.setVideoQuality) {
+          publication.setVideoQuality(remoteQuality);
+        }
+      });
+    });
+  };
+
+  const applyQualityTier = async (tier, options = {}) => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    const { force = false } = options;
+    const now = Date.now();
+    if (!force && tier === activeQualityTierRef.current) return;
+    if (!force && now - lastQualitySwitchAtRef.current < 12000) return;
+
+    const profile = getTierProfile(tier);
+    applyRemoteQuality(room, profile.remoteQuality);
+
+    const cameraPublication = room.localParticipant.getTrackPublication('camera');
+    const cameraTrack = cameraPublication?.track;
+
+    try {
+      if (cameraTrack?.restartTrack && camEnabled) {
+        await cameraTrack.restartTrack({
+          width: profile.width,
+          height: profile.height,
+          frameRate: profile.frameRate,
+        });
+      }
+    } catch {
+      // no-op: keep current track settings if restart is not available
+    }
+
+    activeQualityTierRef.current = tier;
+    lastQualitySwitchAtRef.current = now;
+    setQualityMode(tier);
   };
 
   const appendMessage = (entry) => {
@@ -274,6 +352,9 @@ function App() {
           lostPackets: lost,
           lossPercent,
         });
+
+        const nextTier = resolveQualityTier({ pingMs, lossPercent });
+        void applyQualityTier(nextTier);
       });
     }, 3000);
 
@@ -314,10 +395,10 @@ function App() {
       dynacast: true,
       videoCaptureDefaults: {
         resolution: {
-          width: 1280,
-          height: 720,
+          width: 640,
+          height: 360,
         },
-        frameRate: 24,
+        frameRate: 20,
       },
     });
 
@@ -463,6 +544,7 @@ function App() {
     setMicEnabled(room.localParticipant.isMicrophoneEnabled);
     setCamEnabled(room.localParticipant.isCameraEnabled);
     setScreenSharing(false);
+    await applyQualityTier('balanced', { force: true });
   };
 
   const stopSession = () => {
@@ -475,6 +557,9 @@ function App() {
     setCameraDevices([]);
     setSelectedCameraId('');
     setScreenSharing(false);
+    setQualityMode('balanced');
+    activeQualityTierRef.current = 'balanced';
+    lastQualitySwitchAtRef.current = 0;
     packetStatsRef.current = { sent: 0, lost: 0 };
     localIdentityRef.current = '';
   };
@@ -697,6 +782,7 @@ function App() {
       onToggleScreenShare={handleToggleScreenShare}
       mirrorLocalVideo={mirrorLocalVideo}
       onFlipLocalVideo={handleFlipLocalVideo}
+      qualityMode={qualityMode}
       cameraDevices={cameraDevices}
       selectedCameraId={selectedCameraId}
       onSelectCamera={handleSelectCamera}
