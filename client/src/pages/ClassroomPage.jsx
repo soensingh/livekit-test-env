@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Mic,
   MicOff,
@@ -53,6 +53,32 @@ const ClassroomPage = ({
   const [chatOpen, setChatOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
+  const [pinnedParticipantId, setPinnedParticipantId] = useState(null);
+
+  const visibleParticipants = participants || [];
+  const pinnedParticipant = visibleParticipants.find(
+    (participant) => participant.id === pinnedParticipantId
+  );
+  const sideParticipants = visibleParticipants.filter(
+    (participant) => participant.id !== pinnedParticipantId
+  );
+
+  useEffect(() => {
+    if (
+      pinnedParticipantId &&
+      !visibleParticipants.some(
+        (participant) => participant.id === pinnedParticipantId
+      )
+    ) {
+      setPinnedParticipantId(null);
+    }
+  }, [pinnedParticipantId, visibleParticipants]);
+
+  const togglePinParticipant = (participantId) => {
+    setPinnedParticipantId((currentPinnedId) =>
+      currentPinnedId === participantId ? null : participantId
+    );
+  };
 
   const handleCopyRoomId = () => {
     navigator.clipboard.writeText(roomId);
@@ -139,27 +165,64 @@ const ClassroomPage = ({
       </header>
 
       {/* ── Main Body ── */}
-      <div className={`meet-main${chatOpen ? "" : " chat-closed"}`}>
+      <div className={`meet-main${chatOpen ? " chat-open" : ""}`}>
         {/* ── Video Stage ── */}
-        <section className="video-stage">
-          <div
-            className={`video-grid participants-${Math.min(participants.length, 6)}`}
-          >
-            {participants.length === 0 ? (
-              <div className="video-empty-state">
-                <VideoOff size={44} strokeWidth={1.2} />
-                <p>Waiting for participants…</p>
+        <section className="meet-stage">
+          <div className="video-grid-wrap">
+            {visibleParticipants.length === 0 ? (
+              <div className="video-grid p1">
+                <div className="video-empty-state">
+                  <VideoOff size={44} strokeWidth={1.2} />
+                  <p>Waiting for participants…</p>
+                </div>
+              </div>
+            ) : pinnedParticipant ? (
+              <div
+                className={`video-grid video-grid--pinned${sideParticipants.length === 0 ? " video-grid--pinned-solo" : ""}`}
+              >
+                <div className="video-grid__pinned-main">
+                  <ParticipantTile
+                    participant={pinnedParticipant}
+                    currentRole={role}
+                    onKick={onKickParticipant}
+                    mirrorLocalVideo={mirrorLocalVideo}
+                    isPinned
+                    canPin
+                    onTogglePin={togglePinParticipant}
+                  />
+                </div>
+                {sideParticipants.length > 0 && (
+                  <div className="video-grid__pinned-strip">
+                    {sideParticipants.map((participant) => (
+                      <ParticipantTile
+                        key={participant.id}
+                        participant={participant}
+                        currentRole={role}
+                        onKick={onKickParticipant}
+                        mirrorLocalVideo={mirrorLocalVideo}
+                        canPin
+                        onTogglePin={togglePinParticipant}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
-              participants.map((participant) => (
-                <ParticipantTile
-                  key={participant.id}
-                  participant={participant}
-                  currentRole={role}
-                  onKick={onKickParticipant}
-                  mirrorLocalVideo={mirrorLocalVideo}
-                />
-              ))
+              <div
+                className={`video-grid p${Math.min(Math.max(visibleParticipants.length, 1), 9)}`}
+              >
+                {visibleParticipants.map((participant) => (
+                  <ParticipantTile
+                    key={participant.id}
+                    participant={participant}
+                    currentRole={role}
+                    onKick={onKickParticipant}
+                    mirrorLocalVideo={mirrorLocalVideo}
+                    canPin
+                    onTogglePin={togglePinParticipant}
+                  />
+                ))}
+              </div>
             )}
           </div>
 

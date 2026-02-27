@@ -8,6 +8,8 @@ import {
   MonitorOff,
   UserX,
   Wifi,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 const AVATAR_COLORS = [
@@ -36,6 +38,9 @@ const ParticipantTile = ({
   currentRole,
   onKick,
   mirrorLocalVideo,
+  canPin,
+  isPinned,
+  onTogglePin,
 }) => {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
@@ -92,7 +97,7 @@ const ParticipantTile = ({
   };
 
   return (
-    <div className="tile">
+    <div className={`tile${isPinned ? " tile--pinned" : ""}`}>
       {/* ── Video / placeholder ── */}
       {activeVideoTrack ? (
         <div className="tile-video-wrap">
@@ -148,6 +153,16 @@ const ParticipantTile = ({
                 <UserX size={15} />
               </button>
             )}
+
+          {canPin && (
+            <button
+              className={`tile-pin-btn${isPinned ? " tile-pin-btn--active" : ""}`}
+              onClick={() => onTogglePin?.(participant.id)}
+              title={isPinned ? "Unpin" : "Pin"}
+            >
+              {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+            </button>
+          )}
         </div>
       ) : (
         <div className="tile-video-wrap tile-video-wrap--blank">
@@ -200,6 +215,16 @@ const ParticipantTile = ({
                 <UserX size={15} />
               </button>
             )}
+
+          {canPin && (
+            <button
+              className={`tile-pin-btn${isPinned ? " tile-pin-btn--active" : ""}`}
+              onClick={() => onTogglePin?.(participant.id)}
+              title={isPinned ? "Unpin" : "Pin"}
+            >
+              {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+            </button>
+          )}
         </div>
       )}
 
