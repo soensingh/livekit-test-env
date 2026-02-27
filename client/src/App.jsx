@@ -44,21 +44,118 @@ function App() {
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [canScreenShare, setCanScreenShare] = useState(false);
   const [mirrorLocalVideo, setMirrorLocalVideo] = useState(false);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [adminRooms, setAdminRooms] = useState([]);
   const [cameraDevices, setCameraDevices] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [currentUserId, setCurrentUserId] = useState('');
   const [qualityMode, setQualityMode] = useState('balanced');
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState(null);
 
   const socketRef = useRef(null);
   const roomRef = useRef(null);
   const localIdentityRef = useRef('');
   const preferredFacingModeRef = useRef('user');
   const packetStatsRef = useRef({ sent: 0, lost: 0 });
+  const diagnosticsPrevRef = useRef({ bytesSent: null, timestamp: null });
   const activeQualityTierRef = useRef('balanced');
   const lastQualitySwitchAtRef = useRef(0);
+
+  const resolvePublisherPc = (room) => {
+    if (!room) return null;
+    return (
+      room?.engine?.pcManager?.publisher?.pc ||
+      room?.engine?.publisher?.pc ||
+      room?.engine?.pcManager?.subscriber?.pc ||
+      room?.engine?.subscriber?.pc ||
+      null
+    );
+  };
+
+  const getConnectionDiagnostics = async (room) => {
+    const peerConnection = resolvePublisherPc(room);
+    if (!peerConnection?.getStats) {
+      return {
+        route: 'unknown',
+        candidate: '--',
+        bitrateKbps: null,
+      };
+    }
+
+    const stats = await peerConnection.getStats();
+    let selectedPair = null;
+    let fallbackPair = null;
+    let topOutboundVideo = null;
+
+    stats.forEach((report) => {
+      if (report.type === 'transport' && report.selectedCandidatePairId) {
+        const transportPair = stats.get(report.selectedCandidatePairId);
+        if (transportPair) {
+          selectedPair = transportPair;
+        }
+      }
+
+      if (report.type === 'candidate-pair') {
+        if (report.selected) {
+          selectedPair = report;
+        } else if (!fallbackPair && report.state === 'succeeded' && report.nominated) {
+          fallbackPair = report;
+        }
+      }
+
+      if (
+        report.type === 'outbound-rtp' &&
+        report.kind === 'video' &&
+        !report.isRemote &&
+        typeof report.bytesSent === 'number'
+      ) {
+        if (!topOutboundVideo || report.bytesSent > topOutboundVideo.bytesSent) {
+          topOutboundVideo = report;
+        }
+      }
+    });
+
+    const activePair = selectedPair || fallbackPair;
+    const localCandidate = activePair?.localCandidateId
+      ? stats.get(activePair.localCandidateId)
+      : null;
+    const remoteCandidate = activePair?.remoteCandidateId
+      ? stats.get(activePair.remoteCandidateId)
+      : null;
+
+    const localType = localCandidate?.candidateType || '--';
+    const remoteType = remoteCandidate?.candidateType || '--';
+    const route = localType === 'relay' || remoteType === 'relay' ? 'relay' : 'direct';
+
+    let bitrateKbps = null;
+    if (topOutboundVideo?.bytesSent && typeof topOutboundVideo.timestamp === 'number') {
+      const previous = diagnosticsPrevRef.current;
+      if (
+        typeof previous.bytesSent === 'number' &&
+        typeof previous.timestamp === 'number' &&
+        topOutboundVideo.bytesSent >= previous.bytesSent &&
+        topOutboundVideo.timestamp > previous.timestamp
+      ) {
+        const deltaBytes = topOutboundVideo.bytesSent - previous.bytesSent;
+        const deltaMs = topOutboundVideo.timestamp - previous.timestamp;
+        bitrateKbps = Math.round((deltaBytes * 8) / deltaMs);
+      }
+
+      diagnosticsPrevRef.current = {
+        bytesSent: topOutboundVideo.bytesSent,
+        timestamp: topOutboundVideo.timestamp,
+      };
+    }
+
+    return {
+      route,
+      candidate: `${localType}/${remoteType}`,
+      bitrateKbps,
+    };
+  };
 
   const isScreenShareSource = (source) => {
     if (!source) return false;
@@ -217,6 +314,14 @@ function App() {
   };
 
   useEffect(() => {
+    const supported =
+      typeof navigator !== 'undefined' &&
+      !!navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getDisplayMedia === 'function';
+    setCanScreenShare(supported);
+  }, []);
+
+  useEffect(() => {
     if (!role || role === 'admin') return;
     const socket = io(SIGNALING_URL, { transports: ['websocket'] });
     socketRef.current = socket;
@@ -363,6 +468,45 @@ function App() {
     return () => clearInterval(interval);
   }, [roomId]);
 
+  useEffect(() => {
+    if (!roomId) {
+      setConnectionDiagnostics(null);
+      diagnosticsPrevRef.current = { bytesSent: null, timestamp: null };
+      return;
+    }
+
+    let active = true;
+
+    const pollDiagnostics = async () => {
+      const room = roomRef.current;
+      if (!room) return;
+      try {
+        const diagnostics = await getConnectionDiagnostics(room);
+        if (active) {
+          setConnectionDiagnostics(diagnostics);
+        }
+      } catch {
+        if (active) {
+          setConnectionDiagnostics({
+            route: 'unknown',
+            candidate: '--',
+            bitrateKbps: null,
+          });
+        }
+      }
+    };
+
+    void pollDiagnostics();
+    const interval = setInterval(() => {
+      void pollDiagnostics();
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [roomId]);
+
   const startSession = async (activeRoomId, providedIdentity) => {
     const socket = socketRef.current;
     if (!socket || !activeRoomId) return;
@@ -473,6 +617,7 @@ function App() {
     await room.connect(resolvedSfuUrl, tokenValue, connectOptions);
 
     const localId = room.localParticipant.identity || room.localParticipant.sid || identity;
+    setCurrentUserId(localId);
     upsertParticipant({
       id: localId,
       name: room.localParticipant.name || name || 'You',
@@ -598,10 +743,17 @@ function App() {
     lastQualitySwitchAtRef.current = 0;
     packetStatsRef.current = { sent: 0, lost: 0 };
     localIdentityRef.current = '';
+    setCurrentUserId('');
+    setConnectionDiagnostics(null);
+    diagnosticsPrevRef.current = { bytesSent: null, timestamp: null };
   };
 
   const handleToggleScreenShare = async () => {
     if (!roomRef.current) return;
+    if (!canScreenShare) {
+      setStatus('screen-share-unsupported');
+      return;
+    }
     const next = !screenSharing;
     try {
       await roomRef.current.localParticipant.setScreenShareEnabled(next, { audio: false });
@@ -742,6 +894,7 @@ function App() {
 
     const identity = createIdentity('teacher');
     localIdentityRef.current = identity;
+    setCurrentUserId(identity);
 
     setStatus('connecting');
     socket.emit('room:create', { name, identity }, async (response) => {
@@ -761,6 +914,7 @@ function App() {
 
     const identity = createIdentity('student');
     localIdentityRef.current = identity;
+    setCurrentUserId(identity);
 
     setStatus('connecting');
     socket.emit('room:join', { roomId: roomInput, name, identity }, async (response) => {
@@ -844,10 +998,12 @@ function App() {
       onToggleMic={handleToggleMic}
       onToggleCam={handleToggleCam}
       screenSharing={screenSharing}
+      canScreenShare={canScreenShare}
       onToggleScreenShare={handleToggleScreenShare}
       mirrorLocalVideo={mirrorLocalVideo}
       onFlipLocalVideo={handleFlipLocalVideo}
       qualityMode={qualityMode}
+      connectionDiagnostics={connectionDiagnostics}
       cameraDevices={cameraDevices}
       selectedCameraId={selectedCameraId}
       onSelectCamera={handleSelectCamera}
@@ -857,7 +1013,7 @@ function App() {
       chatInput={chatInput}
       setChatInput={setChatInput}
       onSendChat={handleSendChat}
-      currentUserId={localIdentityRef.current}
+      currentUserId={currentUserId}
     />
   );
 }

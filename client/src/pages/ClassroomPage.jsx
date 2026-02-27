@@ -33,12 +33,14 @@ const ClassroomPage = ({
   micEnabled,
   camEnabled,
   screenSharing,
+  canScreenShare,
   onToggleMic,
   onToggleCam,
   onToggleScreenShare,
   mirrorLocalVideo,
   onFlipLocalVideo,
   qualityMode,
+  connectionDiagnostics,
   cameraDevices,
   selectedCameraId,
   onSelectCamera,
@@ -257,6 +259,19 @@ const ClassroomPage = ({
                   })}
                 </span>
                 {roomId && <span className="meet-room-label">{roomId}</span>}
+                {connectionDiagnostics && (
+                  <div className={`conn-badge conn-badge--${connectionDiagnostics.route}`}>
+                    <span className="conn-badge__route">{connectionDiagnostics.route}</span>
+                    <span className="conn-badge__sep">•</span>
+                    <span className="conn-badge__candidate">{connectionDiagnostics.candidate}</span>
+                    <span className="conn-badge__sep">•</span>
+                    <span className="conn-badge__bitrate">
+                      {typeof connectionDiagnostics.bitrateKbps === "number"
+                        ? `${connectionDiagnostics.bitrateKbps} kbps`
+                        : "-- kbps"}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Center — action buttons */}
@@ -289,9 +304,10 @@ const ClassroomPage = ({
 
                 <div className="ctrl-group">
                   <button
-                    className={`ctrl-btn${screenSharing ? " ctrl-btn--share" : ""}`}
+                    className={`ctrl-btn${screenSharing ? " ctrl-btn--share" : ""}${canScreenShare ? "" : " ctrl-btn--disabled"}`}
                     onClick={onToggleScreenShare}
-                    title={screenSharing ? "Stop sharing" : "Present now"}
+                    title={canScreenShare ? (screenSharing ? "Stop sharing" : "Present now") : "Screen share not supported on this browser/device"}
+                    disabled={!canScreenShare}
                   >
                     {screenSharing ? (
                       <ScreenShareOff size={20} />
