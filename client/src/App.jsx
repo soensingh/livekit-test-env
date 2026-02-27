@@ -857,6 +857,7 @@ function App() {
       chatInput={chatInput}
       setChatInput={setChatInput}
       onSendChat={handleSendChat}
+      currentUserId={localIdentityRef.current}
     />
   );
 }

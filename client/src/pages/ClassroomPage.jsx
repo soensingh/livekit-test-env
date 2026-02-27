@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Mic,
   MicOff,
@@ -53,9 +53,15 @@ const ClassroomPage = ({
   const [chatOpen, setChatOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [pinnedParticipantId, setPinnedParticipantId] = useState(null);
+  const moreMenuRef = useRef(null);
 
   const visibleParticipants = participants || [];
+  const localParticipantId =
+    currentUserId ||
+    visibleParticipants.find((participant) => participant.isLocal)?.id ||
+    null;
   const pinnedParticipant = visibleParticipants.find(
     (participant) => participant.id === pinnedParticipantId
   );
@@ -85,6 +91,16 @@ const ClassroomPage = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const handlePointerDown = (event) => {
+      if (moreMenuRef.current?.contains(event.target)) return;
+      setMoreMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [moreMenuOpen]);
 
   return (
     <div className="meet-shell">
@@ -186,6 +202,7 @@ const ClassroomPage = ({
                     currentRole={role}
                     onKick={onKickParticipant}
                     mirrorLocalVideo={mirrorLocalVideo}
+                    isCurrentUser={pinnedParticipant.id === localParticipantId}
                     isPinned
                     canPin
                     onTogglePin={togglePinParticipant}
@@ -200,6 +217,7 @@ const ClassroomPage = ({
                         currentRole={role}
                         onKick={onKickParticipant}
                         mirrorLocalVideo={mirrorLocalVideo}
+                        isCurrentUser={participant.id === localParticipantId}
                         canPin
                         onTogglePin={togglePinParticipant}
                       />
@@ -218,6 +236,7 @@ const ClassroomPage = ({
                     currentRole={role}
                     onKick={onKickParticipant}
                     mirrorLocalVideo={mirrorLocalVideo}
+                    isCurrentUser={participant.id === localParticipantId}
                     canPin
                     onTogglePin={togglePinParticipant}
                   />
@@ -306,10 +325,10 @@ const ClassroomPage = ({
                   <button
                     className="ctrl-btn"
                     onClick={() => {
-                      onSwitchCamera();
+                      setMoreMenuOpen(false);
                       setCameraMenuOpen(!cameraMenuOpen);
                     }}
-                    title="Switch camera"
+                    title="Camera options"
                   >
                     <SwitchCamera size={20} />
                   </button>
@@ -317,6 +336,15 @@ const ClassroomPage = ({
                   {cameraMenuOpen && cameraDevices.length > 0 && (
                     <div className="camera-dropdown">
                       <p className="camera-dropdown__header">Select camera</p>
+                      <div
+                        className="camera-dropdown__item"
+                        onClick={() => {
+                          onSwitchCamera();
+                          setCameraMenuOpen(false);
+                        }}
+                      >
+                        Switch to next camera
+                      </div>
                       <div
                         className="camera-dropdown__item"
                         onClick={() => {
@@ -342,11 +370,44 @@ const ClassroomPage = ({
                   )}
                 </div>
 
-                <div className="ctrl-group">
-                  <button className="ctrl-btn" title="More options">
+                <div className="ctrl-group ctrl-group--relative" ref={moreMenuRef}>
+                  <button
+                    className={`ctrl-btn${moreMenuOpen ? " ctrl-btn--active-chat" : ""}`}
+                    title="More options"
+                    onClick={() => {
+                      setCameraMenuOpen(false);
+                      setMoreMenuOpen(!moreMenuOpen);
+                    }}
+                  >
                     <MoreVertical size={20} />
                   </button>
                   <span className="ctrl-label">More</span>
+                  {moreMenuOpen && (
+                    <div className="more-dropdown">
+                      <p className="camera-dropdown__header">More options</p>
+                      <div className="camera-dropdown__item" onClick={() => setChatOpen((prev) => !prev)}>
+                        {chatOpen ? "Hide chat" : "Show chat"}
+                      </div>
+                      <div
+                        className="camera-dropdown__item"
+                        onClick={() => {
+                          onFlipLocalVideo();
+                          setMoreMenuOpen(false);
+                        }}
+                      >
+                        {mirrorLocalVideo ? "Unflip self view" : "Flip self view"}
+                      </div>
+                      <div
+                        className="camera-dropdown__item"
+                        onClick={() => {
+                          setPinnedParticipantId(null);
+                          setMoreMenuOpen(false);
+                        }}
+                      >
+                        Reset pin layout
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -374,7 +435,7 @@ const ClassroomPage = ({
 
         {/* ── Chat Panel ── */}
         {chatOpen && (
-          <aside className="chat-panel">
+          <aside className="chat-panel open">
             <div className="chat-header">
               <span className="chat-title">Messages</span>
               <button className="chat-close" onClick={() => setChatOpen(false)}>

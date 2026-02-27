@@ -38,6 +38,7 @@ const ParticipantTile = ({
   currentRole,
   onKick,
   mirrorLocalVideo,
+  isCurrentUser,
   canPin,
   isPinned,
   onTogglePin,
@@ -77,9 +78,9 @@ const ParticipantTile = ({
   }, [activeVideoTrack]);
 
   useEffect(() => {
-    if (participant.audioTrack && !participant.isLocal) {
+    if (participant.audioTrack && !isCurrentUser) {
       participant.audioTrack.attach(audioRef.current);
-    } else if (participant.audioTrack && participant.isLocal) {
+    } else if (participant.audioTrack && isCurrentUser) {
       participant.audioTrack.detach();
     }
     return () => {
@@ -87,7 +88,7 @@ const ParticipantTile = ({
         participant.audioTrack.detach();
       }
     };
-  }, [participant.audioTrack, participant.isLocal]);
+  }, [participant.audioTrack, isCurrentUser]);
 
   const getPingClass = () => {
     if (pingMs === null) return "";
@@ -105,8 +106,8 @@ const ParticipantTile = ({
             ref={videoRef}
             autoPlay
             playsInline
-            muted={participant.isLocal}
-            className={`video${participant.isLocal && mirrorLocalVideo && !participant.isScreenSharing ? " mirrored" : ""}`}
+            muted={isCurrentUser}
+            className={`video${isCurrentUser && mirrorLocalVideo && !participant.isScreenSharing ? " mirrored" : ""}`}
           />
           {/* Overlay: name + signal always visible on video */}
           <div className="tile-overlay">
@@ -122,7 +123,7 @@ const ParticipantTile = ({
               )}
               <span className="tile-overlay__name">
                 {participant.name || "Guest"}
-                {participant.isLocal ? " (You)" : ""}
+                {isCurrentUser ? " (You)" : ""}
               </span>
             </div>
             <div className="signal-badge" title={`Signal: ${signalLevel}/4`}>
@@ -185,7 +186,7 @@ const ParticipantTile = ({
             <div className="tile-overlay__left">
               <span className="tile-overlay__name">
                 {participant.name || "Guest"}
-                {participant.isLocal ? " (You)" : ""}
+                {isCurrentUser ? " (You)" : ""}
               </span>
             </div>
             <div className="signal-badge" title={`Signal: ${signalLevel}/4`}>
@@ -228,7 +229,7 @@ const ParticipantTile = ({
         </div>
       )}
 
-      <audio ref={audioRef} autoPlay muted={participant.isLocal} />
+      <audio ref={audioRef} autoPlay muted={isCurrentUser} />
 
       {/* ── Status icon row ── */}
       <div className="tile-status-row">
