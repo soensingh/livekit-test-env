@@ -8,6 +8,29 @@ import './App.css';
 
 const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || window.location.origin;
 const SFU_URL = import.meta.env.VITE_SFU_URL || '';
+const VIDEO_TARGETS = {
+  smooth: {
+    width: 640,
+    height: 360,
+    frameRate: 15,
+    maxBitrate: 600_000,
+    remoteQuality: VideoQuality.LOW,
+  },
+  balanced: {
+    width: 960,
+    height: 540,
+    frameRate: 24,
+    maxBitrate: 1_200_000,
+    remoteQuality: VideoQuality.MEDIUM,
+  },
+  quality: {
+    width: 1280,
+    height: 720,
+    frameRate: 30,
+    maxBitrate: 1_800_000,
+    remoteQuality: VideoQuality.HIGH,
+  },
+};
 
 const createIdentity = (role) => `${role}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
@@ -44,28 +67,7 @@ function App() {
   };
 
   const getTierProfile = (tier) => {
-    if (tier === 'smooth') {
-      return {
-        width: 480,
-        height: 270,
-        frameRate: 15,
-        remoteQuality: VideoQuality.LOW,
-      };
-    }
-    if (tier === 'quality') {
-      return {
-        width: 960,
-        height: 540,
-        frameRate: 24,
-        remoteQuality: VideoQuality.HIGH,
-      };
-    }
-    return {
-      width: 640,
-      height: 360,
-      frameRate: 20,
-      remoteQuality: VideoQuality.MEDIUM,
-    };
+    return VIDEO_TARGETS[tier] || VIDEO_TARGETS.balanced;
   };
 
   const resolveQualityTier = ({ pingMs, lossPercent }) => {
@@ -385,7 +387,18 @@ function App() {
         ? rawToken
         : rawToken?.token || rawToken?.jwt || '';
 
-    if (!tokenValue || !SFU_URL) {
+    let sfuConfig = null;
+    try {
+      const sfuConfigResponse = await fetch(`${SIGNALING_URL}/api/sfu/config`);
+      sfuConfig = await sfuConfigResponse.json();
+    } catch {
+      sfuConfig = null;
+    }
+
+    const resolvedSfuUrl = SFU_URL || sfuConfig?.url || '';
+    const iceServers = Array.isArray(sfuConfig?.iceServers) ? sfuConfig.iceServers : [];
+
+    if (!tokenValue || !resolvedSfuUrl) {
       setStatus('error');
       return;
     }
@@ -395,10 +408,17 @@ function App() {
       dynacast: true,
       videoCaptureDefaults: {
         resolution: {
-          width: 640,
-          height: 360,
+          width: VIDEO_TARGETS.quality.width,
+          height: VIDEO_TARGETS.quality.height,
         },
-        frameRate: 20,
+        frameRate: VIDEO_TARGETS.quality.frameRate,
+      },
+      publishDefaults: {
+        videoCodec: 'h264',
+        videoEncoding: {
+          maxBitrate: VIDEO_TARGETS.quality.maxBitrate,
+          maxFramerate: VIDEO_TARGETS.quality.frameRate,
+        },
       },
     });
 
@@ -441,7 +461,16 @@ function App() {
       }
     });
 
-    await room.connect(SFU_URL, tokenValue);
+    const connectOptions =
+      iceServers.length > 0
+        ? {
+            rtcConfig: {
+              iceServers,
+            },
+          }
+        : undefined;
+
+    await room.connect(resolvedSfuUrl, tokenValue, connectOptions);
 
     const localId = room.localParticipant.identity || room.localParticipant.sid || identity;
     upsertParticipant({
@@ -455,7 +484,14 @@ function App() {
     });
 
     try {
-      await room.localParticipant.enableCameraAndMicrophone();
+      await room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setCameraEnabled(true, {
+        resolution: {
+          width: VIDEO_TARGETS.quality.width,
+          height: VIDEO_TARGETS.quality.height,
+        },
+        frameRate: VIDEO_TARGETS.quality.frameRate,
+      });
       await refreshCameraDevices();
     } catch {
       setStatus('media-blocked');
@@ -596,7 +632,14 @@ function App() {
   const handleToggleCam = async () => {
     if (!roomRef.current) return;
     const next = !camEnabled;
-    await roomRef.current.localParticipant.setCameraEnabled(next);
+    await roomRef.current.localParticipant.setCameraEnabled(next, {
+      resolution: {
+        width: VIDEO_TARGETS.quality.width,
+        height: VIDEO_TARGETS.quality.height,
+      },
+      frameRate: VIDEO_TARGETS.quality.frameRate,
+      ...(selectedCameraId ? { deviceId: selectedCameraId } : {}),
+    });
     setCamEnabled(next);
     const localId = roomRef.current.localParticipant.identity || roomRef.current.localParticipant.sid || 'local';
     upsertParticipant({ id: localId, videoMuted: !next });
@@ -615,9 +658,21 @@ function App() {
 
     try {
       if (track?.restartTrack) {
-        await track.restartTrack({ deviceId: cameraId });
+        await track.restartTrack({
+          deviceId: cameraId,
+          width: VIDEO_TARGETS.quality.width,
+          height: VIDEO_TARGETS.quality.height,
+          frameRate: VIDEO_TARGETS.quality.frameRate,
+        });
       } else {
-        await roomRef.current.localParticipant.setCameraEnabled(true, { deviceId: cameraId });
+        await roomRef.current.localParticipant.setCameraEnabled(true, {
+          deviceId: cameraId,
+          resolution: {
+            width: VIDEO_TARGETS.quality.width,
+            height: VIDEO_TARGETS.quality.height,
+          },
+          frameRate: VIDEO_TARGETS.quality.frameRate,
+        });
       }
       setCamEnabled(true);
     } catch {
@@ -644,10 +699,20 @@ function App() {
 
     try {
       if (track?.restartTrack) {
-        await track.restartTrack({ facingMode: preferredFacingModeRef.current });
+        await track.restartTrack({
+          facingMode: preferredFacingModeRef.current,
+          width: VIDEO_TARGETS.quality.width,
+          height: VIDEO_TARGETS.quality.height,
+          frameRate: VIDEO_TARGETS.quality.frameRate,
+        });
       } else {
         await roomRef.current.localParticipant.setCameraEnabled(true, {
           facingMode: preferredFacingModeRef.current,
+          resolution: {
+            width: VIDEO_TARGETS.quality.width,
+            height: VIDEO_TARGETS.quality.height,
+          },
+          frameRate: VIDEO_TARGETS.quality.frameRate,
         });
       }
       setCamEnabled(true);

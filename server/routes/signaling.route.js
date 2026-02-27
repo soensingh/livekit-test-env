@@ -7,6 +7,10 @@ router.get('/health', (_req, res) => {
   return res.status(200).json({ status: 'ok' });
 });
 
+router.get('/sfu/config', (_req, res) => {
+  return res.status(200).json(sfuService.getSfuConfig());
+});
+
 router.post('/sfu/token', async (req, res) => {
   const { roomId, identity, name } = req.body || {};
   const token = await sfuService.issueToken({ roomId, identity, name });
