@@ -61,6 +61,7 @@ const ClassroomPage = ({
 
   return (
     <div className="meet-shell">
+
       {/* ── Top Bar ── */}
       <header className="meet-topbar">
         <div className="topbar-brand">
@@ -81,7 +82,11 @@ const ClassroomPage = ({
               {role === "teacher" ? "Teacher" : "Student"}
               &nbsp;|&nbsp;
               <span
-                className={`status-dot ${status === "connected" ? "status-connected" : "status-waiting"}`}
+                className={
+                  status === "connected"
+                    ? "status-connected"
+                    : "status-waiting"
+                }
               >
                 {status}
               </span>
@@ -137,10 +142,14 @@ const ClassroomPage = ({
 
       {/* ── Main Body ── */}
       <div className={`meet-main${chatOpen ? "" : " chat-closed"}`}>
+
         {/* ── Video Stage ── */}
         <section className="video-stage">
           <div
-            className={`video-grid participants-${Math.min(participants.length, 6)}`}
+            className={`video-grid participants-${Math.min(
+              participants.length,
+              6
+            )}`}
           >
             {participants.length === 0 ? (
               <div className="video-empty-state">
@@ -163,6 +172,8 @@ const ClassroomPage = ({
           {/* ── Controls Bar ── */}
           {roomId && (
             <div className="meet-controls">
+
+              {/* Left — time + room ID */}
               <div className="controls-left">
                 <span className="meet-time">
                   {new Date().toLocaleTimeString([], {
@@ -170,10 +181,14 @@ const ClassroomPage = ({
                     minute: "2-digit",
                   })}
                 </span>
-                {roomId && <span className="meet-room-label">{roomId}</span>}
+                {roomId && (
+                  <span className="meet-room-label">{roomId}</span>
+                )}
               </div>
 
+              {/* Center — all action buttons */}
               <div className="controls-center">
+
                 {/* Mic */}
                 <div className="ctrl-group">
                   <button
@@ -205,7 +220,9 @@ const ClassroomPage = ({
                 {/* Screen Share */}
                 <div className="ctrl-group">
                   <button
-                    className={`ctrl-btn${screenSharing ? " ctrl-btn--share" : ""}`}
+                    className={`ctrl-btn${
+                      screenSharing ? " ctrl-btn--share" : ""
+                    }`}
                     onClick={onToggleScreenShare}
                     title={screenSharing ? "Stop sharing" : "Present now"}
                   >
@@ -220,10 +237,10 @@ const ClassroomPage = ({
                   </span>
                 </div>
 
-                {/* Flip */}
+                {/* Flip — wired directly to onFlipLocalVideo prop, reads mirrorLocalVideo prop */}
                 <div className="ctrl-group">
                   <button
-                    className="ctrl-btn"
+                    className={`ctrl-btn${mirrorLocalVideo ? " ctrl-btn--flip-active" : ""}`}
                     onClick={onFlipLocalVideo}
                     title={mirrorLocalVideo ? "Unflip video" : "Flip video"}
                   >
@@ -266,7 +283,11 @@ const ClassroomPage = ({
                       {cameraDevices.map((device, idx) => (
                         <div
                           key={device.deviceId}
-                          className={`camera-dropdown__item${selectedCameraId === device.deviceId ? " camera-dropdown__item--active" : ""}`}
+                          className={`camera-dropdown__item${
+                            selectedCameraId === device.deviceId
+                              ? " camera-dropdown__item--active"
+                              : ""
+                          }`}
                           onClick={() => {
                             onSelectCamera(device.deviceId);
                             setCameraMenuOpen(false);
@@ -297,15 +318,19 @@ const ClassroomPage = ({
                 </button>
               </div>
 
+              {/* Right — chat toggle */}
               <div className="controls-right">
                 <button
-                  className={`ctrl-btn${chatOpen ? " ctrl-btn--active-chat" : ""}`}
+                  className={`ctrl-btn${
+                    chatOpen ? " ctrl-btn--active-chat" : ""
+                  }`}
                   onClick={() => setChatOpen(!chatOpen)}
                   title="In-call messages"
                 >
                   <MessageSquare size={22} />
                 </button>
               </div>
+
             </div>
           )}
         </section>
@@ -315,7 +340,10 @@ const ClassroomPage = ({
           <aside className="chat-panel">
             <div className="chat-header">
               <span className="chat-title">In-call messages</span>
-              <button className="chat-close" onClick={() => setChatOpen(false)}>
+              <button
+                className="chat-close"
+                onClick={() => setChatOpen(false)}
+              >
                 ✕
               </button>
             </div>
@@ -347,7 +375,9 @@ const ClassroomPage = ({
                 }}
               />
               <button
-                className={`chat-send-btn${chatInput.trim() ? " chat-send-btn--active" : ""}`}
+                className={`chat-send-btn${
+                  chatInput.trim() ? " chat-send-btn--active" : ""
+                }`}
                 onClick={onSendChat}
                 title="Send"
               >
